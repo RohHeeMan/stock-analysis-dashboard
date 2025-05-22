@@ -1,5 +1,5 @@
 import os
-import json   # load_cached에서 JSON 파싱용
+import json   # load_cached에서 JSON 파싱용aa
 import warnings
 import logging
 import pandas as pd
