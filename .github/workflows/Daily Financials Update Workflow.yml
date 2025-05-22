@@ -26,15 +26,17 @@ jobs:
         env:
           DART_API_KEY:   ${{ secrets.DART_API_KEY }}
           DATABASE_URL:   ${{ secrets.DATABASE_URL }}
+          PYTHONIOENCODING: utf-8   # 👈 Python 출력 강제 UTF-8 인코딩
         run: |
-          # 콘솔 인코딩을 UTF-8로 설정 (한글 깨짐 방지)
+          # 콘솔 인코딩을 UTF-8로 설정
           chcp.com 65001
           [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          $OutputEncoding = [System.Text.Encoding]::UTF8
 
           # 에러 무시
           $ErrorActionPreference = 'Continue'
 
-          # 파이썬 스크립트 직접 실행 (출력이 콘솔에 바로 표시됨)
+          # 실행
           python main.py
 
       - name: Send notification email
