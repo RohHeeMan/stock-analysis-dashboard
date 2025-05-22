@@ -1,0 +1,15 @@
+streamlit
+pandas
+requests
+python-dotenv
+yfinance
+transformers
+torch
+matplotlib
+requests-cache
+lxml
+sqlalchemy
+psycopg2-binary
+python-dotenv
+tqdm
+psycopg[binary]>=3.1
