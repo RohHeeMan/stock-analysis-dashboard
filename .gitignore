@@ -15,3 +15,7 @@ build/
 # 시스템 파일
 .DS_Store
 Thumbs.db
+
+# Python bytecode
+__pycache__/
+*.py[cod]
