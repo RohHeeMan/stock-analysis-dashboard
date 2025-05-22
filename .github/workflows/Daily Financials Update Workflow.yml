@@ -21,23 +21,21 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run data collector (재무제표 수집)
-        id: run-main
         shell: powershell
         continue-on-error: true
         env:
           DART_API_KEY:   ${{ secrets.DART_API_KEY }}
           DATABASE_URL:   ${{ secrets.DATABASE_URL }}
         run: |
-         # 1) 콘솔을 UTF-8 모드로 전환
-         chcp.com 65001
-         [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+          # 콘솔 인코딩을 UTF-8로 설정 (한글 깨짐 방지)
+          chcp.com 65001
+          [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-          # 2) PowerShell 에러 무시
+          # 에러 무시
           $ErrorActionPreference = 'Continue'
-      
-          # 3) 파이썬 실행 결과 캡처
-          $output = python main.py 2>&1
-          Write-Host $output
+
+          # 파이썬 스크립트 직접 실행 (출력이 콘솔에 바로 표시됨)
+          python main.py
 
       - name: Send notification email
         if: always()
