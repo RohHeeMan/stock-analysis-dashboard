@@ -234,9 +234,9 @@ def main():
                                         'yr': yr, 'fq': fs_qtr, 'rp': rpt, 'fd': fs_div,
                                         'aid': r.get('account_id'),
                                         'anm': r.get('account_nm'),
-                                        'ta': int(r.get('thstrm_amount') or 0),
-                                        'fa': int(r.get('frmtrm_amount') or 0),
-                                        'ba': int(r.get('bfefrm_amount') or 0)
+                                        'ta': int(float(r.get('thstrm_amount') or 0)),                                        
+                                        'fa': int(float(r.get('frmtrm_amount') or 0)),
+                                        'ba': int(float(r.get('bfefrm_amount') or 0))
                                     })
                             continue
 
