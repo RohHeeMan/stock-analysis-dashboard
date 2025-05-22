@@ -121,34 +121,67 @@ def fetch_quarter_data(year: int, qtr: str, df_codes: pd.DataFrame, engine: Engi
 
         # DART 불러오기 및 결합
         tickers = df_new['ticker'].tolist()
-        df_equity = pd.read_sql(
-            text("""
-                SELECT ticker, fs_year AS fiscal_year,
-                       fs_qtr  AS fiscal_qtr,
-                       thstrm_amount::numeric AS equity_parent
-                  FROM raw_financials
-                 WHERE account_id = 'ifrs-full_EquityAttributableToOwnersOfParent'
-                   AND fs_div     = 'CFS'
-                   AND ticker     IN :tickers
-                   AND fs_year    = :year
-                   AND fs_qtr     = :qtr
-            """),
-            engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
-        )
-        df_profit = pd.read_sql(
-            text("""
-                SELECT ticker, fs_year AS fiscal_year,
-                       fs_qtr  AS fiscal_qtr,
-                       thstrm_amount::numeric AS profit_parent
-                  FROM raw_financials
-                 WHERE account_id = 'ifrs-full_ProfitLossAttributableToOwnersOfParent'
-                   AND fs_div = 'CFS'
-                   AND ticker IN :tickers
-                   AND fs_year    = :year
-                   AND fs_qtr     = :qtr
-            """),
-            engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
-        )
+        if not tickers:
+            # tickers가 비어있으면 빈 DataFrame 반환(상장폐지된 경우)
+            df_equity = pd.DataFrame(columns=['ticker', 'fiscal_year', 'fiscal_qtr', 'equity_parent'])
+            df_profit = pd.DataFrame(columns=['ticker', 'fiscal_year', 'fiscal_qtr', 'profit_parent'])
+        else:
+            df_equity = pd.read_sql(
+                text("""
+                    SELECT ticker, fs_year AS fiscal_year,
+                        fs_qtr  AS fiscal_qtr,
+                        thstrm_amount::numeric AS equity_parent
+                    FROM raw_financials
+                    WHERE account_id = 'ifrs-full_EquityAttributableToOwnersOfParent'
+                    AND fs_div     = 'CFS'
+                    AND ticker     IN :tickers
+                    AND fs_year    = :year
+                    AND fs_qtr     = :qtr
+                """),
+                engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
+            )
+            df_profit = pd.read_sql(
+                text("""
+                    SELECT ticker, fs_year AS fiscal_year,
+                        fs_qtr  AS fiscal_qtr,
+                        thstrm_amount::numeric AS profit_parent
+                    FROM raw_financials
+                    WHERE account_id = 'ifrs-full_ProfitLossAttributableToOwnersOfParent'
+                    AND fs_div = 'CFS'
+                    AND ticker IN :tickers
+                    AND fs_year    = :year
+                    AND fs_qtr     = :qtr
+                """),
+                engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
+            )        
+        # df_equity = pd.read_sql(
+        #     text("""
+        #         SELECT ticker, fs_year AS fiscal_year,
+        #                fs_qtr  AS fiscal_qtr,
+        #                thstrm_amount::numeric AS equity_parent
+        #           FROM raw_financials
+        #          WHERE account_id = 'ifrs-full_EquityAttributableToOwnersOfParent'
+        #            AND fs_div     = 'CFS'
+        #            AND ticker     IN :tickers
+        #            AND fs_year    = :year
+        #            AND fs_qtr     = :qtr
+        #     """),
+        #     engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
+        # )
+        # df_profit = pd.read_sql(
+        #     text("""
+        #         SELECT ticker, fs_year AS fiscal_year,
+        #                fs_qtr  AS fiscal_qtr,
+        #                thstrm_amount::numeric AS profit_parent
+        #           FROM raw_financials
+        #          WHERE account_id = 'ifrs-full_ProfitLossAttributableToOwnersOfParent'
+        #            AND fs_div = 'CFS'
+        #            AND ticker IN :tickers
+        #            AND fs_year    = :year
+        #            AND fs_qtr     = :qtr
+        #     """),
+        #     engine, params={'tickers': tuple(tickers), 'year': year, 'qtr': qtr}
+        # )
 
         df_new = df_new.merge(df_equity, on=['ticker', 'fiscal_year', 'fiscal_qtr'], how='left') \
                        .merge(df_profit, on=['ticker', 'fiscal_year', 'fiscal_qtr'], how='left')
