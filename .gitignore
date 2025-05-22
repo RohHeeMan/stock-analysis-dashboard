@@ -1,0 +1,17 @@
+# Python 관련
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+dist/
+build/
+
+# 환경 설정
+.env
+
+# VS Code 관련
+.vscode/
+
+# 시스템 파일
+.DS_Store
+Thumbs.db
