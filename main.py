@@ -428,6 +428,14 @@ def main():
     df_summary = df_summary.merge(df_val, on=['ticker','fiscal_year','fiscal_qtr'], how='left')
     logger.info("✓ STEP2: KRX 데이터 병합 완료")
 
+    # 재무제표 보는법
+    # FY - (1Q + 2Q + 3Q) = 4Q
+    # 네이버의 2024기준
+    # 4분기 매출 = 연간 매출 - 3분기 누적 매출
+    # = 107,380억 원 - (25,261 + 26,105 + 27,156)억 원
+    # = 107,380억 원 - 78,522억 원
+    # = 28,858억 원
+
     # summary_financials에 KRX 지표 업데이트
     logger.info("▶ STEP3: summary_financials에 KRX 지표 업데이트 중...")
     with engine.begin() as conn:
