@@ -221,12 +221,16 @@ def main():
                 logger.info(f"▶ DART 수집: {tkr}|{corp_name}|{yr} → report_codes: {rpt_list}")
                 results = []
 
+                # 지금 코드의 목적은 **"이미 수집한 데이터가 있으면 API는 생략하되, DB에는 데이터가 없다면 삽입하고,
+                # 혹시 바뀐 게 있으면 업데이트까지 하자"**라는 식의 동기화 로직이에요.
                 for rpt in rpt_list:
                     fs_qtr = REPORT_MAP[rpt]
                     for fs_div in FS_DIVS:
+                        # 1. 캐시 존재 여부 확인
                         cached = load_cached(corp_code, tkr, yr, fs_div, fs_qtr, rpt)
                         if cached is not None and len(cached) > 0:
                             cache_hits += 1
+                            logger.info(f"✔ 캐시 HIT - DB 동기화 진행 중: {corp_name} ({tkr}) | {yr}년 {fs_qtr}, {fs_div}, 보고서코드 {rpt}")
                             with engine.begin() as conn:
                                 for r in cached:
                                     conn.execute(raw_sql, {
@@ -238,13 +242,15 @@ def main():
                                         'fa': int(float(r.get('frmtrm_amount') or 0)),
                                         'ba': int(float(r.get('bfefrm_amount') or 0))
                                     })
-                            continue
+                            continue   # 캐시에서 불러온 경우 → API 생략
 
                         # 캐시 없으면 DB raw_financials 존재여부 체크(전기금액,전전기금액 호출하기 전 존재유무 판단)
                         # 3년치 데이터를 기준으로 가져오는데 예를들면 2022년도까지만 있고 2021은 당연히 데이터가 없다.
                         # 그런데 전년도 전전년도 금액이 2022년 데이터의 필드로 있으니까 과거 데이터를 찾으면 안되고
                         # 2022년도의 raw_financials 테이블의 frmtrm_amount,bfefrm_amount를 통해 가져와야 한다.
                         # 그래야 이미 집계된 자료의 호출을 줄일수 있다.
+
+                        # 2. 캐시도 없으니 DB에 이미 있는지 확인
                         with engine.connect() as conn:
                             count = conn.execute(text("""
                                 SELECT COUNT(*) FROM raw_financials
@@ -255,8 +261,10 @@ def main():
                         if count > 0:
                             continue  # DB에 데이터가 있으면 API 호출 안 함
 
+                        # 3. 캐시도 없고 DB에도 없으면 실제 API 호출
                         api_calls += 1
                         try:
+                            logger.info(f"📡 API 호출 진행: {corp_name} ({tkr}) | {yr}년 {fs_qtr}, {fs_div}, 보고서코드 {rpt}")
                             part = fetch_all_statements_for_year(corp_code, tkr, yr, rpt, fs_div)
                             results.extend(part)
                         except Exception as e:
