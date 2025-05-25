@@ -3,8 +3,9 @@ import os
 import io
 import zipfile
 import logging
-import xml.etree.ElementTree as ET
 import json
+import time
+import xml.etree.ElementTree as ET
 
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
@@ -40,12 +41,18 @@ REPORT_MAP   = {
     '11013': '1Q',  # 1분기
 }
 FS_DIVS = ['CFS', 'OFS']
-
-# REPORT_CODES 와 REPORT_MAP 정의 이후에 추가
 REVERSE_REPORT_MAP = {v: k for k, v in REPORT_MAP.items()}
 
+# ─── 제한 및 재시도 설정 ─────────────────────────────────────────────────
 #MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
-MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
+MAX_CALLS = int(os.getenv('MAX_CALLS', '19200'))
+DELAY_BETWEEN_CALLS = float(os.getenv('DART_DELAY', '1.2'))
+RETRY_LIMIT = int(os.getenv('DART_RETRY_LIMIT', '3'))
+BACKOFF_FACTOR = float(os.getenv('DART_BACKOFF_FACTOR', '1.0'))
+SKIP_THRESHOLD = int(os.getenv('DART_SKIP_THRESHOLD', '5'))
+
+# per-corp skip counter
+skip_fail_counts: Dict[str, int] = {}
 
 # ─── 유틸리티 ───────────────────────────────────────────────────────────
 def get_today_kst() -> date:
@@ -69,6 +76,7 @@ def fetch(url: str, **kwargs) -> requests.Response:
         resp.raise_for_status()
         return resp
     except Exception:
+        # 호출 실패 시 카운트 복원
         with engine.begin() as conn:
             conn.execute(text(
                 "UPDATE dart_state SET used_calls = used_calls - 1 WHERE date = :d"
@@ -131,7 +139,6 @@ def fetch_all_corp_codes() -> List[Dict[str,str]]:
 def save_cache(
     corp_code: str,
     stock_code: str,
-    #corp_name: str,        # ← 추가        
     year: int,
     fs_qtr: int,
     report_code: str,
@@ -178,56 +185,71 @@ def fetch_all_statements_for_year(
 ) -> List[Tuple[List[Dict], str, str, str]]:
     """
     corp_code, stock_code, year별로 DART 재무제표(CFS/OFS)를 가져옵니다.
-    ▶ DART API 호출 한도 초과 시 즉시 종료(sys.exit) 처리합니다.
+    요청 간 딜레이, 재시도 로직, 클라이언트 호출 수 제한, 반복 실패 시 스킵 처리 포함.
     """
+    # 스킵 처리 확인
+    if skip_fail_counts.get(corp_code, 0) >= SKIP_THRESHOLD:
+        logger.error(f"▷ {corp_code}/{stock_code}: 반복 실패 횟수 초과({SKIP_THRESHOLD})로 스킵 처리")
+        return []
+
     results: List[Tuple[List[Dict], str, str, str]] = []
     report_list = [rpt] if rpt else REPORT_CODES
     fs_list     = [fs_div] if fs_div else FS_DIVS
+    skip_for_corp = False
+
     for rpt_code in report_list:
-        for fs in fs_list:    
-            try:
-                resp = fetch(
-                    DART_ENDPOINT,
-                    params={
-                        'crtfc_key': DART_API_KEY,
-                        'corp_code': corp_code,                        
-                        'bsns_year': str(year),
-                        'reprt_code': rpt_code,
-                        'fs_div': fs,                        
-                    },
-                    timeout=15
-                )
-                data = resp.json()
-
-                # ▶ DART 자체 에러 메시지에 “호출 한도(nnn)” 가 포함됐는지 확인
-                if isinstance(data, dict) and data.get('status') == 'ERROR':
-                    msg = data.get('message','')
-                    # 메시지에 “한도(<MAX_CALLS>)” 혹은 rate limit 키워드가 있으면 종료
-                    if f'한도({MAX_CALLS})' in msg or 'rate limit' in msg.lower():
-                        logger.error(
-                            f"DART API 호출 한도({MAX_CALLS}) 초과 감지: "
-                            f"{corp_code}/{stock_code}/{year}/{rpt}/{fs_div} → 프로그램 종료"
-                        )
-                        sys.exit(1)
-
-                items = data.get('list') or []
-
-            except Exception as e:
-                text = str(e)
-                # ▶ 예외 메시지에도 “호출 한도” 키워드가 있으면 종료
-                if '호출 한도' in text and f"({MAX_CALLS})" in text:
-                    logger.error(
-                        f"DART API 호출 한도({MAX_CALLS}) 초과 감지 (예외): "
-                        f"{corp_code}/{stock_code}/{year}/{rpt}/{fs_div} → 프로그램 종료"
+        for fs in fs_list:
+            items = None
+            # 재시도 로직
+            for attempt in range(1, RETRY_LIMIT + 1):
+                # 호출 간 딜레이
+                time.sleep(DELAY_BETWEEN_CALLS)
+                try:
+                    resp = fetch(
+                        DART_ENDPOINT,
+                        params={
+                            'crtfc_key': DART_API_KEY,
+                            'corp_code': corp_code,
+                            'bsns_year': str(year),
+                            'reprt_code': rpt_code,
+                            'fs_div': fs,
+                        },
+                        timeout=15
                     )
-                    sys.exit(1)
+                    data = resp.json()
 
-                # 그 외 모든 예외는 경고로 기록하고 계속
-                logger.warning(
-                    f"{corp_code}-{stock_code}-{year}-{rpt}-{fs_div} 호출 실패: {e}"
-                )
-                continue
+                    # DART 자체 에러 메시지 체크
+                    if data.get('status') == 'ERROR':
+                        msg = data.get('message', '')
+                        if f'한도({MAX_CALLS})' in msg or 'rate limit' in msg.lower():
+                            logger.error(f"▷ 호출 한도 초과 감지: {msg}")
+                            sys.exit(1)
+                    items = data.get('list') or []
+                    break
 
+                except Exception as e:
+                    # 마지막 재시도 전
+                    if attempt < RETRY_LIMIT:
+                        backoff = BACKOFF_FACTOR * attempt
+                        logger.warning(
+                            f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 호출 실패 (재시도 {attempt}/{RETRY_LIMIT}): {e}"
+                        )
+                        time.sleep(backoff)
+                        continue
+                    # 마지막 재시도 실패
+                    logger.error(
+                        f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 호출 실패(재시도 모두 실패): {e}"
+                    )
+                    skip_fail_counts[corp_code] = skip_fail_counts.get(corp_code, 0) + 1
+                    if skip_fail_counts[corp_code] >= SKIP_THRESHOLD:
+                        logger.error(
+                            f"▷ {corp_code}/{stock_code}: 반복 실패 횟수({skip_fail_counts[corp_code]}) 초과로 스킵 처리"
+                        )
+                        skip_for_corp = True
+                    break
+
+            if skip_for_corp:
+                break
             if not items:
                 continue
 
@@ -244,4 +266,8 @@ def fetch_all_statements_for_year(
             ]
             fiscal_qtr = REPORT_MAP.get(rpt_code, rpt_code)
             results.append((recs, rpt_code, fs, fiscal_qtr))
+
+        if skip_for_corp:
+            break
+
     return results
