@@ -51,6 +51,7 @@ def _fetch_quarter_api_data(year: int, qtr: str, df_codes: pd.DataFrame) -> pd.D
         else:
             ds_actual = ds_tr
             eps_val   = pd.NA
+        # krx자료중 eps, per가 없는 기업은 상장폐지등 많이 안좋은 기업임.
         df_end = stock.get_market_fundamental(ds_tr, ds_tr, tkr)
         bps_val = int(df_end['BPS'].iloc[-1]) if not df_end.empty else pd.NA
         return ds_actual, eps_val, bps_val
@@ -106,7 +107,14 @@ def fetch_quarter_data(year: int, qtr: str, df_codes: pd.DataFrame, engine: Engi
     missing_set = set(df_missing['stock_code'])
 
     # 2) 0값 종목
-    bad = set(df_cached.loc[(df_cached['eps'] <= 0) | (df_cached['bps'] <= 0), 'ticker'])
+    # bad = set(df_cached.loc[(df_cached['eps'] <= 0) | (df_cached['bps'] <= 0), 'ticker'])
+    bad = set(
+        df_cached.loc[
+            (df_cached['eps'].isnull()) | (df_cached['bps'].isnull()) |
+            (df_cached['eps'] <= 0) | (df_cached['bps'] <= 0),
+            'ticker'
+        ]
+    )    
 
     # 3) 재조회 대상
     to_fetch = missing_set.union(bad)
