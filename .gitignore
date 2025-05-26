@@ -19,3 +19,6 @@ Thumbs.db
 # Python bytecode
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+*.pyd

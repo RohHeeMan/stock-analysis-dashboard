@@ -101,17 +101,30 @@ def summary_financials(raw: pd.DataFrame) -> pd.DataFrame:
         # revenue        = sum_accts(grp, ['ifrs-full_Revenue','ifrs-full_SalesRevenue'])
         # -- 매출 및 이익 --
         # Revenue: 다양한 매출 과목을 모두 포함
+        # -- 1. 매출 항목 (넓게 잡기) --
         revenue        = sum_accts(grp, [
             'ifrs-full_Revenue',             # 기본 매출
             'ifrs-full_SalesRevenueGoods',   # 재화 판매 매출
             'ifrs-full_NetSales'             # 순매출
+            'dart_SalesRevenue'              # DART에서 가끔 이걸로 제공(신규추가)
         ])        
+        
+        # -- 2. 매출원가 --
         cost_of_sales  = sum_accts(grp, ['ifrs-full_CostOfSales','ifrs-full_CostOfRevenue'])
+        # -- 3. 매출총이익 --
         gross_profit   = sum_accts(grp, ['ifrs-full_GrossProfit','ifrs-full_GrossProfitLoss'])
+
         if not revenue and gross_profit == 0:
             gross_profit = revenue - cost_of_sales
 
-        operating_income = sum_accts(grp, ['ifrs-full_OperatingIncome','ifrs-full_ProfitLossFromOperatingActivities'])
+        # -- 4. 영업이익 (Operating Income) --
+        operating_income = sum_accts(grp, [
+            'ifrs-full_OperatingIncome',
+            'ifrs-full_ProfitLossFromOperatingActivities',
+            'dart_OperatingIncomeLoss'
+        ])
+
+        # 값이 없거나 0일 경우 gross_profit - op_expenses 방식으로 대체
         if operating_income == 0:
             op_expenses = sum_accts(grp, [
                 'ifrs-full_OperatingExpenses',
@@ -119,11 +132,22 @@ def summary_financials(raw: pd.DataFrame) -> pd.DataFrame:
                 'ifrs-full_AdministrativeExpenses',
                 'ifrs-full_SellingExpenses'
             ])
-            operating_income = gross_profit - op_expenses
 
-        net_income = sum_accts(grp, ['ifrs-full_NetIncome','ifrs-full_ProfitLoss'])
+            if gross_profit != 0 and op_expenses != 0:
+                operating_income = gross_profit - op_expenses
+
+        # -- 5. 당기순이익 (Net Income) --
+        net_income = sum_accts(grp, [
+            'ifrs-full_NetIncome',
+            'ifrs-full_ProfitLoss'
+        ])
+
+        # 없으면 대체 계정으로 계산
         if net_income == 0:
-            net_income = sum_accts(grp, ['ifrs-full_ProfitLossFromContinuingOperations'])
+            net_income = sum_accts(grp, [
+                'ifrs-full_ProfitLossFromContinuingOperations',
+                'dart_ProfitLossFromContinuingOperations'
+            ])
 
         # -- 유동성 --
         current_assets = sum_accts(grp, ['ifrs-full_CurrentAssets'])
@@ -208,6 +232,149 @@ def summary_financials(raw: pd.DataFrame) -> pd.DataFrame:
             'per': None,
             'pbr': None
         })
+
+    # for (tkr, yr, fq), grp in grouped:
+    #     print(grp[['account_id','account_nm','thstrm_amount']])
+    #     # -- 매출 및 이익 --
+    #     # Revenue: 다양한 매출 과목을 모두 포함
+    #     revenue = sum_accts(grp, [
+    #         'ifrs-full_Revenue',
+    #         'ifrs-full_SalesRevenueGoods',
+    #         'ifrs-full_NetSales',
+    #         'dart_SalesRevenue'  # ← 누락된 콤마 추가됨
+    #     ])
+
+    #     # -- 2. 매출원가 --
+    #     cost_of_sales = sum_accts(grp, ['ifrs-full_CostOfSales','ifrs-full_CostOfRevenue'])
+
+    #     # -- 3. 매출총이익 --
+    #     gross_profit = sum_accts(grp, ['ifrs-full_GrossProfit','ifrs-full_GrossProfitLoss'])
+
+    #     # 보완: 매출총이익이 없고, 매출과 매출원가가 있는 경우 직접 계산
+    #     if gross_profit == 0 and revenue and cost_of_sales:
+    #         gross_profit = revenue - cost_of_sales
+
+    #     # -- 4. 영업이익 --
+    #     # --- 4. 영업이익 ---
+    #     operating_income = sum_accts(grp, [
+    #         'ifrs-full_OperatingIncome',
+    #         'ifrs-full_ProfitLossFromOperatingActivities'
+    #     ])
+
+    #     if (operating_income is None or operating_income == 0):
+    #         op_expenses = sum_accts(grp, [
+    #             'ifrs-full_OperatingExpenses',
+    #             'ifrs-full_SellingGeneralAdministrativeExpenses',
+    #             'ifrs-full_AdministrativeExpenses',
+    #             'ifrs-full_SellingExpenses',
+    #             'dart_SGAndA'
+    #         ])
+
+    #         if gross_profit and op_expenses:
+    #             operating_income = gross_profit - op_expenses
+    #         else:
+    #             print(f'[WARN] {tkr} {yr}Q{fq} :: Cannot calculate operating income. gross_profit={gross_profit}, op_expenses={op_expenses}')        
+    #     # operating_income = sum_accts(grp, ['ifrs-full_OperatingIncome','ifrs-full_ProfitLossFromOperatingActivities'])
+
+    #     # # 보완: 영업이익이 없을 경우, 영업비용을 이용해 추정 계산
+    #     # if operating_income == 0 and gross_profit:
+    #     #     op_expenses = sum_accts(grp, [
+    #     #         'ifrs-full_OperatingExpenses',
+    #     #         'ifrs-full_SellingGeneralAdministrativeExpenses',
+    #     #         'ifrs-full_AdministrativeExpenses',
+    #     #         'ifrs-full_SellingExpenses'
+    #     #     ])
+    #     #     if op_expenses:
+    #     #         operating_income = gross_profit - op_expenses
+
+    #     net_income = sum_accts(grp, ['ifrs-full_NetIncome','ifrs-full_ProfitLoss'])
+    #     if net_income == 0:
+    #         net_income = sum_accts(grp, ['ifrs-full_ProfitLossFromContinuingOperations'])
+
+    #     # -- 유동성 --
+    #     current_assets = sum_accts(grp, ['ifrs-full_CurrentAssets'])
+    #     current_liabs  = sum_accts(grp, ['ifrs-full_CurrentLiabilities'])
+    #     inventory      = sum_accts(grp, ['ifrs-full_Inventory'])
+
+    #     # -- 자본·부채·자산 --
+    #     total_liabs = sum_accts(grp, ['ifrs-full_TotalLiabilities'])
+    #     if total_liabs == 0:
+    #         total_liabs = sum_by_name(grp, ['Liabilities','부채'])
+
+    #     equity = sum_accts(grp, ['ifrs-full_Equity'])
+    #     if equity == 0:
+    #         equity = sum_by_name(grp, ['Equity','자본총계'])
+
+    #     total_assets = sum_accts(grp, ['ifrs-full_TotalAssets'])
+    #     if total_assets == 0:
+    #         total_assets = sum_by_name(grp, ['Assets','자산총계'])
+
+    #     # -- 이자 비용 --
+    #     interest_exp = sum_accts(grp, [
+    #         'ifrs-full_InterestExpense',
+    #         'ifrs-full_FinanceCosts',
+    #         'ifrs-full_FinanceExpense'
+    #     ])
+
+    #     # -- 영업활동 현금흐름 --
+    #     cfo = sum_accts(grp, [
+    #         'ifrs-full_CashFlowsFromOperatingActivities',
+    #         'ifrs-full_CashFlowsFromUsedInOperatingActivities'
+    #     ])
+
+    #     # -- 투자활동 현금흐름 (capex) --
+    #     capex_out = sum_accts(grp, INVEST_OUT_IDS)
+    #     capex_in  = sum_accts(grp, INVEST_IN_IDS)
+    #     capex     = capex_out - capex_in
+
+    #     # -- 잉여현금흐름 --
+    #     free_cash_flow = cfo - capex
+
+    #     # -- 비율 계산 --
+    #     gross_margin      = (gross_profit    / revenue      * 100) if revenue      else None
+    #     operating_margin  = (operating_income/ revenue      * 100) if revenue      else None
+    #     net_margin        = (net_income      / revenue      * 100) if revenue      else None
+    #     fcf_margin        = (free_cash_flow  / revenue      * 100) if revenue      else None
+    #     current_ratio     = (current_assets  / current_liabs * 100) if current_liabs else None
+    #     quick_ratio       = ((current_assets - inventory) / current_liabs * 100) if current_liabs else None
+    #     debt_to_equity    = (total_liabs     / equity       * 100) if equity       else None
+    #     interest_coverage = (operating_income/ abs(interest_exp))   if interest_exp else None
+    #     roe               = (net_income      / equity       * 100) if equity       else None
+    #     roa               = (net_income      / total_assets * 100) if total_assets else None
+
+    #     # -- 레코드 추가 --
+    #     records.append({
+    #         'ticker': tkr,
+    #         'fiscal_year': yr,
+    #         'fiscal_qtr': fq,
+    #         'revenue': revenue,
+    #         'gross_profit': gross_profit,
+    #         'operating_income': operating_income,
+    #         'net_income': net_income,
+    #         'gross_margin': gross_margin,
+    #         'operating_margin': operating_margin,
+    #         'net_margin': net_margin,
+    #         'roe': roe,
+    #         'debt_to_equity': debt_to_equity,
+    #         'fcf_margin': fcf_margin,
+    #         'cfo': cfo,
+    #         'capex': capex,
+    #         'free_cash_flow': free_cash_flow,
+    #         'current_ratio': current_ratio,
+    #         'quick_ratio': quick_ratio,
+    #         'interest_coverage': interest_coverage,
+    #         'roa': roa,
+    #         'rev_yoy': None,
+    #         'op_inc_yoy': None,
+    #         'net_inc_yoy': None,
+    #         'shares_outstanding': None,
+    #         'market_price': None,
+    #         'eps': None,
+    #         'bps': None,
+    #         'per': None,
+    #         'pbr': None
+    #     })
+
 
     # 6) DataFrame 생성 및 YoY 계산
     df = pd.DataFrame(records)
