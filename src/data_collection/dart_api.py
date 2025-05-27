@@ -41,11 +41,10 @@ REPORT_MAP   = {
     '11013': '1Q',  # 1분기
 }
 FS_DIVS = ['CFS', 'OFS']
-REVERSE_REPORT_MAP = {v: k for k, v in REPORT_MAP.items()}
 
 # ─── 제한 및 재시도 설정 ─────────────────────────────────────────────────
 #MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
-MAX_CALLS = int(os.getenv('MAX_CALLS', '19200'))
+MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
 DELAY_BETWEEN_CALLS = float(os.getenv('DART_DELAY', '1.2'))
 RETRY_LIMIT = int(os.getenv('DART_RETRY_LIMIT', '3'))
 BACKOFF_FACTOR = float(os.getenv('DART_BACKOFF_FACTOR', '1.0'))
@@ -184,25 +183,27 @@ def fetch_all_statements_for_year(
     fs_div: str = None
 ) -> List[Tuple[List[Dict], str, str, str]]:
     """
-    corp_code, stock_code, year별로 DART 재무제표(CFS/OFS)를 가져옵니다.
-    요청 간 딜레이, 재시도 로직, 클라이언트 호출 수 제한, 반복 실패 시 스킵 처리 포함.
+    corp_code, stock_code, year별로 DART 재무제표(CFS 우선, OFS 대체)를 가져옵니다.
+    요청 간 딜레이, 재시도 로직, 호출수 제한, 반복 실패 시 스킵 처리 포함.
     """
-    # 스킵 처리 확인
     if skip_fail_counts.get(corp_code, 0) >= SKIP_THRESHOLD:
-        logger.error(f"▷ {corp_code}/{stock_code}: 반복 실패 횟수 초과({SKIP_THRESHOLD})로 스킵 처리")
+        logger.error(f"▷ {corp_code}/{stock_code}: 실패 {SKIP_THRESHOLD}회 초과로 스킵")
         return []
 
     results: List[Tuple[List[Dict], str, str, str]] = []
     report_list = [rpt] if rpt else REPORT_CODES
-    fs_list     = [fs_div] if fs_div else FS_DIVS
     skip_for_corp = False
 
     for rpt_code in report_list:
-        for fs in fs_list:
+        fiscal_qtr = REPORT_MAP.get(rpt_code, rpt_code)
+        collected = False
+
+        for fs in ['CFS', 'OFS']:
+            if collected:
+                break
+
             items = None
-            # 재시도 로직
             for attempt in range(1, RETRY_LIMIT + 1):
-                # 호출 간 딜레이
                 time.sleep(DELAY_BETWEEN_CALLS)
                 try:
                     resp = fetch(
@@ -218,56 +219,47 @@ def fetch_all_statements_for_year(
                     )
                     data = resp.json()
 
-                    # DART 자체 에러 메시지 체크
+                    # API 에러 응답 처리
                     if data.get('status') == 'ERROR':
                         msg = data.get('message', '')
                         if f'한도({MAX_CALLS})' in msg or 'rate limit' in msg.lower():
                             logger.error(f"▷ 호출 한도 초과 감지: {msg}")
                             sys.exit(1)
+
                     items = data.get('list') or []
-                    break
+                    break  # 정상 수신 후 루프 종료
 
                 except Exception as e:
-                    # 마지막 재시도 전
                     if attempt < RETRY_LIMIT:
                         backoff = BACKOFF_FACTOR * attempt
-                        logger.warning(
-                            f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 호출 실패 (재시도 {attempt}/{RETRY_LIMIT}): {e}"
-                        )
+                        logger.warning(f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 재시도 {attempt}/{RETRY_LIMIT}: {e}")
                         time.sleep(backoff)
-                        continue
-                    # 마지막 재시도 실패
-                    logger.error(
-                        f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 호출 실패(재시도 모두 실패): {e}"
-                    )
-                    skip_fail_counts[corp_code] = skip_fail_counts.get(corp_code, 0) + 1
-                    if skip_fail_counts[corp_code] >= SKIP_THRESHOLD:
-                        logger.error(
-                            f"▷ {corp_code}/{stock_code}: 반복 실패 횟수({skip_fail_counts[corp_code]}) 초과로 스킵 처리"
-                        )
-                        skip_for_corp = True
-                    break
+                    else:
+                        logger.error(f"▷ {corp_code}-{stock_code}-{year}-{rpt_code}-{fs} 최종 실패: {e}")
+                        skip_fail_counts[corp_code] = skip_fail_counts.get(corp_code, 0) + 1
+                        if skip_fail_counts[corp_code] >= SKIP_THRESHOLD:
+                            logger.error(f"▷ {corp_code}/{stock_code}: {SKIP_THRESHOLD}회 이상 실패로 스킵")
+                            skip_for_corp = True
+                        break
 
             if skip_for_corp:
                 break
-            if not items:
-                continue
 
-            # 정상 수신 시 파싱
+            if not items:
+                continue  # 데이터 없음 → 다음 fs_div 시도
+
             recs = [
                 {
-                    'account_id':    it.get('account_id',''),
-                    'account_nm':    it.get('account_nm',''),
-                    'thstrm_amount': it.get('thstrm_amount',''),
-                    'frmtrm_amount': it.get('frmtrm_amount',''),
-                    'bfefrm_amount': it.get('bfefrm_amount',''),
+                    'account_id':    it.get('account_id', ''),
+                    'account_nm':    it.get('account_nm', ''),
+                    'thstrm_amount': it.get('thstrm_amount', ''),
+                    'frmtrm_amount': it.get('frmtrm_amount', ''),
+                    'bfefrm_amount': it.get('bfefrm_amount', ''),
                 }
                 for it in items
             ]
-            fiscal_qtr = REPORT_MAP.get(rpt_code, rpt_code)
-            results.append((recs, rpt_code, fs, fiscal_qtr))
 
-        if skip_for_corp:
-            break
+            results.append((recs, rpt_code, fs, fiscal_qtr))
+            collected = True  # CFS 또는 OFS 수집 성공 → 다음 report_code로
 
     return results

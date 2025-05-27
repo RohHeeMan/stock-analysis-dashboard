@@ -207,7 +207,9 @@ def fetch_quarter_data(year: int, qtr: str, df_codes: pd.DataFrame, engine: Engi
     df_new = df_new.reindex(columns=valid_cached.columns, fill_value=pd.NA)
 
     df_new.dropna(axis=1, how='all', inplace=True)  # 모든 값이 NA인 컬럼 제거
-    valid_cached.dropna(axis=1, how='all', inplace=True)
+    # valid_cached.dropna(axis=1, how='all', inplace=True)
+    valid_cached = valid_cached.copy()
+    valid_cached.dropna(axis=1, how='all', inplace=True)    
 
     # 4) 이제 컬럼이 일치하므로 concat해도 FutureWarning 없음
     result = pd.concat([valid_cached, df_new], ignore_index=True)

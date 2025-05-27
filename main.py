@@ -225,7 +225,21 @@ def main():
                 # 혹시 바뀐 게 있으면 업데이트까지 하자"**라는 식의 동기화 로직이에요.
                 for rpt in rpt_list:
                     fs_qtr = REPORT_MAP[rpt]
+                    
                     for fs_div in FS_DIVS:
+                        # ✅ CFS가 존재하면 OFS는 아예 생략
+                        if fs_div == 'OFS':
+                            with engine.connect() as conn:
+                                cfs_exists = conn.execute(text("""
+                                    SELECT 1 FROM raw_financials
+                                    WHERE ticker = :tk AND fs_year = :yr AND fs_qtr = :fq
+                                    AND report_code = :rp AND fs_div = 'CFS'
+                                    LIMIT 1
+                                """), {'tk': tkr, 'yr': yr, 'fq': fs_qtr, 'rp': rpt}).fetchone()
+                            if cfs_exists:
+                                logger.debug(f"🛑 {corp_name} ({tkr}) | {yr} {fs_qtr} → CFS 존재 → OFS 생략")
+                                continue
+
                         # 1. 캐시 존재 여부 확인
                         cached = load_cached(corp_code, tkr, yr, fs_div, fs_qtr, rpt)
                         if cached is not None and len(cached) > 0:
@@ -238,19 +252,13 @@ def main():
                                         'yr': yr, 'fq': fs_qtr, 'rp': rpt, 'fd': fs_div,
                                         'aid': r.get('account_id'),
                                         'anm': r.get('account_nm'),
-                                        'ta': int(float(r.get('thstrm_amount') or 0)),                                        
+                                        'ta': int(float(r.get('thstrm_amount') or 0)),
                                         'fa': int(float(r.get('frmtrm_amount') or 0)),
                                         'ba': int(float(r.get('bfefrm_amount') or 0))
                                     })
-                            continue   # 캐시에서 불러온 경우 → API 생략
+                            continue  # 캐시 HIT → API 생략
 
-                        # 캐시 없으면 DB raw_financials 존재여부 체크(전기금액,전전기금액 호출하기 전 존재유무 판단)
-                        # 3년치 데이터를 기준으로 가져오는데 예를들면 2022년도까지만 있고 2021은 당연히 데이터가 없다.
-                        # 그런데 전년도 전전년도 금액이 2022년 데이터의 필드로 있으니까 과거 데이터를 찾으면 안되고
-                        # 2022년도의 raw_financials 테이블의 frmtrm_amount,bfefrm_amount를 통해 가져와야 한다.
-                        # 그래야 이미 집계된 자료의 호출을 줄일수 있다.
-
-                        # 2. 캐시도 없으니 DB에 이미 있는지 확인
+                        # 2. DB에 raw_financials 데이터가 이미 있는지 확인
                         with engine.connect() as conn:
                             count = conn.execute(text("""
                                 SELECT COUNT(*) FROM raw_financials
@@ -259,16 +267,16 @@ def main():
                             """), {'tk': tkr, 'yr': yr, 'fq': fs_qtr, 'rp': rpt, 'fd': fs_div}).scalar()
 
                         if count > 0:
-                            continue  # DB에 데이터가 있으면 API 호출 안 함
+                            continue  # DB에 이미 있으면 API 생략
 
-                        # 3. 캐시도 없고 DB에도 없으면 실제 API 호출
+                        # 3. 캐시, DB 모두 없으면 API 호출
                         api_calls += 1
                         try:
                             logger.info(f"📡 API 호출 진행: {corp_name} ({tkr}) | {yr}년 {fs_qtr}, {fs_div}, 보고서코드 {rpt}")
                             part = fetch_all_statements_for_year(corp_code, tkr, yr, rpt, fs_div)
                             results.extend(part)
                         except Exception as e:
-                            logger.warning(f"{tkr}-{yr}-{fs_div}/{rpt} API 호출 실패: {e}")
+                            logger.warning(f"{tkr}-{yr}-{fs_div}/{rpt} API 호출 실패: {e}")                
 
                 # --- 전전기 데이터 수집 (prev_year) ---
                 prev = []
@@ -352,22 +360,29 @@ def main():
         else:
             raise  # 그 외는 다시 에러 발생
 
-    # 3) SUMMARY 생성
+    # 3) SUMMARY 생성(이건 종목 조건을 넣어서 돌리면 안된다.)
     logger.info("▶ STEP1: SUMMARY 생성 중...")
+
     df_raw = pd.read_sql_query(
         text("""
             SELECT ticker, fs_year AS fiscal_year,
-                   report_code, fs_div,
-                   account_id, account_nm,
-                   thstrm_amount::numeric AS amount,
-                   created_at AS report_date
-              FROM raw_financials
-             WHERE fs_year BETWEEN :start AND :end
-               AND fs_div IN ('CFS','OFS')
+                report_code, fs_div,
+                account_id, account_nm,
+                thstrm_amount::numeric AS amount,
+                created_at AS report_date
+            FROM raw_financials
+            WHERE ticker = :tk
+            AND fs_year BETWEEN :start AND :end
+            AND fs_div IN ('CFS','OFS')
         """),
         engine,
-        params={'start': YEARS[0], 'end': YEARS[-1]}
-    )
+        params={
+            'tk': tkr,  # ← 현재 루프 중인 ticker 변수 사용
+            'start': YEARS[0],
+            'end': YEARS[-1]
+        }
+    )    
+
     df_raw['div_pri'] = df_raw['fs_div'].map({'CFS': 0, 'OFS': 1})
     df_raw = (
         df_raw
@@ -462,6 +477,8 @@ def main():
             AND sf.fiscal_qtr  = k.fiscal_qtr;
         """))
     logger.info("✓ summary_financials에 KRX 지표 업데이트 완료")
+
+
     end = datetime.now(kst)
     logger.info(f"[완료] {end.isoformat()} (소요: {end-start})")
 
