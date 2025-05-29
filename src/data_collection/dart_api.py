@@ -43,6 +43,14 @@ REPORT_MAP   = {
 FS_DIVS = ['CFS', 'OFS']
 
 # ─── 제한 및 재시도 설정 ─────────────────────────────────────────────────
+# 기능	                설명
+# ──────────────────────────────────────────────────────────────────────
+# MAX_CALLS	          : 일일 호출 수 제한 (기본 19,000)
+# DELAY_BETWEEN_CALLS :	호출 간 지연 시간 (기본 1.2초)
+# RETRY_LIMIT	      : 실패 시 재시도 횟수 (기본 3회)
+# BACKOFF_FACTOR	  : 재시도 시 딜레이 증가율
+# SKIP_THRESHOLD	  : 특정 종목 반복 실패 허용 횟수
+
 #MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
 MAX_CALLS = int(os.getenv('MAX_CALLS', '19000'))
 DELAY_BETWEEN_CALLS = float(os.getenv('DART_DELAY', '1.2'))
